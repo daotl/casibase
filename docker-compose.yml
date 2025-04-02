@@ -1,27 +1,81 @@
 version: '3.1'
 services:
   casibase:
-    restart: always
+    restart: unless-stopped
+    # image: casbin/casibase:${CASIBASE_TAG}
     build:
       context: ./
       dockerfile: Dockerfile
       target: STANDARD
     entrypoint: /bin/sh -c './server --createDatabase=true'
-    ports:
-      - "8000:8000"
+    networks:
+      - default
+      - web
+    #ports:
+    #  - "14000:14000"
+    expose:
+      - 14000
     depends_on:
-      - db
+      - postgres
     environment:
       RUNNING_IN_DOCKER: "true"
     volumes:
       - ./conf:/conf/
-  db:
-    restart: always
-    image: mysql:8.0.25
-    platform: linux/amd64
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: 123456
+      - casibase_cache:/casibase_cache
+      - casibase_app:/casibase_app
+      # For the default storage provider
+      - casibase_files:/files
+    labels:
+      caddy: casibase.example.com, admin.casibase.example.com
+      caddy.reverse_proxy: "{{upstreams 14000}}"
+
+  postgres:
+    image: postgres:${POSTGRES_TAG}
+    # command: postgres -c 'config_file=/etc/postgresql/postgresql.conf'
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'casibase']
+      timeout: 10s
+      retries: 5
     volumes:
-      - /usr/local/docker/mysql:/var/lib/mysql
+      - /etc/localtime:/etc/localtime:ro
+      # - ./postgres.conf:/etc/postgresql/postgresql.conf
+      - postgres:/var/lib/postgresql/data
+    #ports:
+    #  - "5432:5432"
+    expose:
+      - 5432
+    environment:
+      POSTGRES_DB: casibase
+      POSTGRES_USER: casibase
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+volumes:
+  casibase_cache:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${VOLUMES_ROOT}/casibase/cache
+      o: bind
+  casibase_app:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${VOLUMES_ROOT}/casibase/app
+      o: bind
+  casibase_files:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${VOLUMES_ROOT}/casibase/files
+      o: bind
+  postgres:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${VOLUMES_ROOT}/postgres
+      o: bind
+
+networks:
+  web:
+    external: true
